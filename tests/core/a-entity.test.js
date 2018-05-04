@@ -1,4 +1,4 @@
-/* global assert, process, sinon, setup, suite, teardown, test, HTMLElement */
+/* global AFRAME, assert, process, sinon, setup, suite, teardown, test, HTMLElement */
 var AEntity = require('core/a-entity');
 var ANode = require('core/a-node');
 var extend = require('utils').extend;
@@ -19,15 +19,20 @@ var TestComponent = {
   remove: function () { },
   play: function () { },
   pause: function () { },
-  tick: function () { }
+  tick: function () { },
+  tock: function () { }
 };
 
 suite('a-entity', function () {
+  var el;
+
   setup(function (done) {
-    var el = this.el = entityFactory();
-    el.addEventListener('loaded', function () {
+    el = this.el = entityFactory();
+    var onLoaded = function () {
       done();
-    });
+      el.removeEventListener('loaded', onLoaded);
+    };
+    el.addEventListener('loaded', onLoaded);
   });
 
   teardown(function () {
@@ -152,6 +157,7 @@ suite('a-entity', function () {
       entity.addEventListener('loaded', function () {
         assert.ok(entityChild1.hasLoaded);
         assert.ok(entityChild2.hasLoaded);
+        document.body.removeChild(scene);
         done();
       });
     });
@@ -198,6 +204,7 @@ suite('a-entity', function () {
       el.addEventListener('loaded', function () {
         assert.ok(assetsEl.hasLoaded);
         assert.ok(el.hasLoaded);
+        document.body.removeChild(sceneEl);
         done();
       });
       ANode.prototype.load.call(assetsEl);
@@ -308,6 +315,28 @@ suite('a-entity', function () {
       assert.equal(material.roughness, 0.75);
     });
 
+    test('can update a single component attribute with a string', function () {
+      var el = this.el;
+      var material;
+      el.setAttribute('material', 'color: #F0F; roughness: 0.25');
+      assert.equal(el.getAttribute('material').roughness, 0.25);
+      el.setAttribute('material', 'roughness: 0.75');
+      material = el.getAttribute('material');
+      assert.equal(material.color, '#F0F');
+      assert.equal(material.roughness, 0.75);
+    });
+
+    test('can clobber component attributes with a string and flag', function () {
+      var el = this.el;
+      var material;
+      el.setAttribute('material', 'color: #F0F; roughness: 0.25');
+      el.setAttribute('material', 'color: #000', true);
+      material = el.getAttribute('material');
+      assert.equal(material.color, '#000');
+      assert.equal(material.roughness, 0.5);
+      assert.equal(el.getDOMAttribute('material').roughness, undefined);
+    });
+
     test('transforms object to string before setting on DOM', function () {
       var el = this.el;
       var positionObj = {x: 10, y: 20, z: 30};
@@ -318,10 +347,10 @@ suite('a-entity', function () {
     test('can update component data', function () {
       var el = this.el;
       el.setAttribute('position', '10 20 30');
-      assert.deepEqual(el.getAttribute('position'), {x: 10, y: 20, z: 30});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 10, y: 20, z: 30});
 
       el.setAttribute('position', {x: 30, y: 20, z: 10});
-      assert.deepEqual(el.getAttribute('position'), {x: 30, y: 20, z: 10});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 30, y: 20, z: 10});
     });
 
     test('can partially update multiple properties of a component', function () {
@@ -337,10 +366,33 @@ suite('a-entity', function () {
       assert.equal(geometry.width, 3);
     });
 
+    test('partial updates of array properties assign by reference', function () {
+      // Arrays are assigned by reference and mutable.
+      var sourceArray = [1, 2, 3];
+      registerComponent('test', {
+        schema: {array: {type: 'array'}}
+      });
+      this.el.setAttribute('test', {array: sourceArray});
+      assert.strictEqual(this.el.getAttribute('test').array, sourceArray);
+    });
+
+    test('partial updates of array-type properties do trigger update', function () {
+      // Updates to array do not trigger update handler.
+      var updateSpy;
+      registerComponent('test', {
+        schema: {array: {type: 'array'}},
+        update: function () { /* no-op */ }
+      });
+      this.el.setAttribute('test', {array: [1, 2, 3]});
+      updateSpy = this.sinon.spy(this.el.components.test, 'update');
+      this.el.setAttribute('test', {array: [4, 5, 6]});
+      assert.ok(updateSpy.called);
+    });
+
     test('can partially update vec3', function () {
       var el = this.el;
       el.setAttribute('position', {y: 20});
-      assert.deepEqual(el.getAttribute('position'), {x: 0, y: 20, z: 0});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 0, y: 20, z: 0});
     });
 
     test('can update component property with asymmetrical property type', function () {
@@ -362,6 +414,86 @@ suite('a-entity', function () {
       });
       el.setAttribute('test', 'asym', 1);
       el.setAttribute('test', 'other', 2);
+    });
+
+    test('only stores modified properties in attribute cache', function () {
+      var el = this.el;
+      el.setAttribute('geometry', {primitive: 'box'});
+      assert.deepEqual(el.components.geometry.attrValue, {primitive: 'box'});
+      el.setAttribute('geometry', {primitive: 'sphere', radius: 10});
+      assert.deepEqual(el.components.geometry.attrValue, {primitive: 'sphere', radius: 10});
+    });
+
+    test('only caches modified properties when changing schema only', function () {
+      var el = this.el;
+      var geometry;
+      el.setAttribute('geometry', {primitive: 'box'});
+      assert.deepEqual(el.components.geometry.attrValue, {primitive: 'box'});
+      el.setAttribute('geometry', {primitive: 'sphere', radius: 10});
+      assert.deepEqual(el.components.geometry.attrValue, {primitive: 'sphere', radius: 10});
+      geometry = el.getAttribute('geometry');
+      assert.equal(geometry.primitive, 'sphere');
+      assert.equal(geometry.radius, 10);
+      assert.notOk(geometry.depth);
+      assert.notOk(geometry.height);
+      assert.notOk(geometry.width);
+    });
+
+    test('parses individual properties when passing object', function (done) {
+      var el = this.el;
+      AFRAME.registerComponent('foo', {
+        schema: {
+          bar: {type: 'asset'},
+          baz: {type: 'asset'}
+        },
+
+        init: function () {
+          assert.equal(this.data.bar, 'test.png');
+          assert.equal(this.data.baz, 'test.jpg');
+          delete AFRAME.components.foo;
+          done();
+        }
+      });
+      el.setAttribute('foo', {
+        bar: 'url(test.png)',
+        baz: 'url(test.jpg)'
+      });
+    });
+
+    test('merges updates with previous data', function (done) {
+      var el = this.el;
+      el.addEventListener('child-attached', evt => {
+        el = evt.detail.el;
+        el.addEventListener('loaded', evt => {
+          var geometry;
+          var setObj;
+
+          assert.shallowDeepEqual(el.components.geometry.attrValue, {primitive: 'box', width: 5});
+
+          // First setAttribute.
+          setObj = {depth: 10, height: 20};
+          el.setAttribute('geometry', setObj);
+          geometry = el.getAttribute('geometry');
+          assert.equal(geometry.depth, 10);
+          assert.equal(geometry.height, 20);
+          assert.equal(geometry.width, 5, 'First setAttribute');
+          assert.equal(el.components.geometry.previousAttrValue, setObj);
+
+          // Second setAttribute.
+          el.setAttribute('geometry', {depth: 20, height: 10});
+          geometry = el.getAttribute('geometry');
+          assert.shallowDeepEqual(el.components.geometry.attrValue, {
+            depth: 20,
+            height: 10,
+            width: 5
+          });
+          assert.equal(geometry.width, 5, 'Second setAttribute');
+          done();
+        });
+      });
+
+      // Initial data.
+      el.innerHTML = '<a-entity geometry="primitive: box; width: 5">';
     });
   });
 
@@ -412,20 +544,6 @@ suite('a-entity', function () {
       });
       el.appendChild(childEl);
     });
-
-    test('flushes default component values', function (done) {
-      var parentEl = this.el;
-      var el = document.createElement('a-entity');
-      el.addEventListener('loaded', function () {
-        el.flushToDOM();
-        assert.equal(HTMLElement.prototype.getAttribute.call(el, 'position'), '0 0 0');
-        assert.equal(HTMLElement.prototype.getAttribute.call(el, 'rotation'), '0 0 0');
-        assert.equal(HTMLElement.prototype.getAttribute.call(el, 'scale'), '1 1 1');
-        assert.equal(HTMLElement.prototype.getAttribute.call(el, 'visible'), 'true');
-        done();
-      });
-      parentEl.appendChild(el);
-    });
   });
 
   suite('detachedCallback', function () {
@@ -463,12 +581,108 @@ suite('a-entity', function () {
       components.test = undefined;
       registerComponent('test', TestComponent);
       el.setAttribute('test', '');
-      assert.notEqual(el.sceneEl.behaviors.indexOf(el.components.test), -1);
+      assert.notEqual(el.sceneEl.behaviors.tick.indexOf(el.components.test), -1);
+      assert.notEqual(el.sceneEl.behaviors.tock.indexOf(el.components.test), -1);
       parentEl.removeChild(el);
       process.nextTick(function () {
         assert.notOk('test' in el.components);
-        assert.equal(el.sceneEl.behaviors.indexOf(el.components.test), -1);
+        assert.equal(el.sceneEl.behaviors.tick.indexOf(el.components.test), -1);
+        assert.equal(el.sceneEl.behaviors.tock.indexOf(el.components.test), -1);
         done();
+      });
+    });
+
+    test('handles detaching with with uninitialized components', function () {
+      var box = document.createElement('a-entity');
+      var el = this.el;
+      box.setAttribute('geometry', {primitive: 'box'});
+      el.sceneEl.appendChild(box);
+      el.sceneEl.removeChild(box);
+      // Just check it doesn't error.
+    });
+  });
+
+  suite('load', function () {
+    test('does not try to load if not attached', function () {
+      var el = document.createElement('a-entity');
+      var nodeLoadSpy = this.sinon.spy(ANode.prototype, 'load');
+      el.load();
+      assert.notOk(nodeLoadSpy.called);
+    });
+
+    test('does not try to initialized during load callback if not attached', function (done) {
+      var childEl = document.createElement('a-entity');
+      var el = document.createElement('a-entity');
+      var nodeLoadSpy;
+
+      el.parentEl = true;
+      el.appendChild(childEl);
+      el.load();
+      el.parentEl = null;
+      childEl.emit('loaded');
+
+      nodeLoadSpy = this.sinon.spy(AEntity.prototype, 'updateComponents');
+      setTimeout(function () {
+        assert.notOk(nodeLoadSpy.called);
+        done();
+      });
+    });
+
+    test('wait for all the children nodes that are not yet nodes to load', function (done) {
+      var el = this.el;
+      var a = document.createElement('a-entity');
+      var b = document.createElement('a-entity');
+      var aLoaded = false;
+      var bLoaded = false;
+      el.appendChild(a);
+      el.appendChild(b);
+      process.nextTick(function () {
+        a.isNode = false;
+        a.hasLoaded = false;
+        b.isNode = false;
+        b.hasLoaded = false;
+        el.hasLoaded = false;
+        el.addEventListener('loaded', function () {
+          assert.ok(el.hasLoaded);
+          assert.ok(aLoaded);
+          assert.ok(bLoaded);
+          done();
+        });
+        a.addEventListener('loaded', function () { aLoaded = true; });
+        b.addEventListener('loaded', function () { bLoaded = true; });
+        el.load();
+        assert.notOk(el.hasLoaded);
+        a.load();
+        b.load();
+      });
+    });
+
+    test('wait for all the children primitives that are not yet nodes to load', function (done) {
+      var el = this.el;
+      var a = document.createElement('a-sphere');
+      var b = document.createElement('a-box');
+      var aLoaded = false;
+      var bLoaded = false;
+      el.appendChild(a);
+      el.appendChild(b);
+      process.nextTick(function () {
+        a.isNode = false;
+        a.hasLoaded = false;
+        b.isNode = false;
+        b.hasLoaded = false;
+        el.hasLoaded = false;
+        el.addEventListener('loaded', function () {
+          assert.ok(el.hasLoaded);
+          assert.ok(aLoaded);
+          assert.ok(bLoaded);
+          done();
+        });
+        a.addEventListener('loaded', function () { aLoaded = true; });
+        b.addEventListener('loaded', function () { bLoaded = true; });
+        el.load();
+        assert.notOk(el.hasLoaded);
+        a.load();
+        b.load();
       });
     });
   });
@@ -487,18 +701,6 @@ suite('a-entity', function () {
       var el = this.el;
       el.setAttribute('material', '');
       assert.shallowDeepEqual(el.getDOMAttribute('material'), {});
-    });
-
-    test('returns null for a default component if it is not set', function () {
-      var el = this.el;
-      assert.shallowDeepEqual(el.getDOMAttribute('position'), null);
-    });
-
-    test('returns parsed data if default component is set', function () {
-      var el = this.el;
-      var position = {x: 5, y: 6, z: 6};
-      el.setAttribute('position', position);
-      assert.shallowDeepEqual(el.getDOMAttribute('position'), position);
     });
 
     test('returns partial component data', function () {
@@ -628,25 +830,6 @@ suite('a-entity', function () {
     });
   });
 
-  suite('getOrCreateObject3D', function () {
-    test('creates an object3D if the type does not exist', function () {
-      var el = this.el;
-      el.getOrCreateObject3D('mesh', THREE.Object3D);
-      assert.ok(el.getObject3D('mesh'));
-      assert.equal(el.getObject3D('mesh').constructor, THREE.Object3D);
-    });
-
-    test('returns existing object3D if it exists', function () {
-      var el = this.el;
-      var Constructor = function () {};
-      var dummy = {};
-      el.object3DMap['dummy'] = dummy;
-      el.getOrCreateObject3D('dummy', Constructor);
-      assert.ok(el.getObject3D('dummy'));
-      assert.equal(el.getObject3D('dummy'), dummy);
-    });
-  });
-
   suite('getAttribute', function () {
     test('returns full component data', function () {
       var componentData;
@@ -656,13 +839,6 @@ suite('a-entity', function () {
       assert.equal(componentData.primitive, 'box');
       assert.equal(componentData.width, 5);
       assert.ok('height' in componentData);
-    });
-
-    test('returns default value on a default component not set', function () {
-      var el = this.el;
-      var defaultPosition = {x: 0, y: 0, z: 0};
-      var elPosition = el.getAttribute('position');
-      assert.shallowDeepEqual(elPosition, defaultPosition);
     });
 
     test('returns full data of a multiple component', function () {
@@ -679,6 +855,79 @@ suite('a-entity', function () {
       var el = this.el;
       el.setAttribute('class', 'pied piper');
       assert.equal(el.getAttribute('class'), 'pied piper');
+    });
+
+    test('returns the component data object', function () {
+      var el = this.el;
+      var data;
+      el.setAttribute('geometry', {primitive: 'sphere', radius: 10});
+      data = el.getAttribute('geometry');
+      assert.ok(el.components.geometry.data === data);
+    });
+
+    test('returns position previously set with setAttribute', function () {
+      var el = this.el;
+      el.setAttribute('position', {x: 1, y: 2, z: 3});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 1, y: 2, z: 3});
+    });
+
+    test('returns position set by modifying the object3D position', function () {
+      var el = this.el;
+      el.object3D.position.set(1, 2, 3);
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 1, y: 2, z: 3});
+    });
+
+    test('returns rotation previously set with setAttribute', function () {
+      var el = this.el;
+      el.setAttribute('rotation', {x: 10, y: 45, z: 50});
+      assert.shallowDeepEqual(el.getAttribute('rotation'), {x: 10, y: 45, z: 50});
+    });
+
+    test('returns rotation previously set by modifying the object3D rotation', function () {
+      var el = this.el;
+      el.object3D.rotation.set(Math.PI, Math.PI / 2, Math.PI / 4);
+      assert.shallowDeepEqual(el.getAttribute('rotation'), {x: 180, y: 90, z: 45});
+    });
+
+    test('returns rotation previously set by modifying the object3D quaternion', function () {
+      var el = this.el;
+      var quaternion = new THREE.Quaternion();
+      var euler = new THREE.Euler();
+      var rotation;
+      euler.order = 'YXZ';
+      euler.set(Math.PI / 2, Math.PI, 0);
+      quaternion.setFromEuler(euler);
+      el.object3D.quaternion.copy(quaternion);
+      rotation = el.getAttribute('rotation');
+      assert.equal(Math.round(rotation.x), 90);
+    });
+
+    test('returns scale previously set with setAttribute', function () {
+      var el = this.el;
+      el.setAttribute('scale', {x: 1, y: 2, z: 3});
+      assert.shallowDeepEqual(el.getAttribute('scale'), {x: 1, y: 2, z: 3});
+    });
+
+    test('returns scale set by modifying the object3D scale', function () {
+      var el = this.el;
+      el.object3D.scale.set(1, 2, 3);
+      assert.shallowDeepEqual(el.getAttribute('scale'), {x: 1, y: 2, z: 3});
+    });
+
+    test('returns visible previously set with setAttribute', function () {
+      var el = this.el;
+      el.setAttribute('visible', false);
+      assert.equal(el.getAttribute('visible'), false);
+      el.setAttribute('visible', true);
+      assert.equal(el.getAttribute('visible'), true);
+    });
+
+    test('returns visible set by modifying the object3D visible', function () {
+      var el = this.el;
+      el.object3D.visible = false;
+      assert.equal(el.getAttribute('visible'), false);
+      el.object3D.visible = true;
+      assert.equal(el.getAttribute('visible'), true);
     });
   });
 
@@ -709,15 +958,7 @@ suite('a-entity', function () {
       assert.notOk(el.components.sound__test);
     });
 
-    test('does not remove default component', function () {
-      var el = this.el;
-      assert.ok('position' in el.components);
-      el.removeAttribute('position');
-      assert.equal(el.getDOMAttribute('position'), null);
-      assert.ok('position' in el.components);
-    });
-
-    test('does not remove mixed-in component', function () {
+    test('can remove mixed-in component', function () {
       var el = this.el;
       var mixinId = 'geometry';
       mixinFactory(mixinId, {geometry: 'primitive: box'});
@@ -725,9 +966,29 @@ suite('a-entity', function () {
       el.setAttribute('geometry', 'primitive: sphere');
       assert.ok('geometry' in el.components);
       el.removeAttribute('geometry');
-      assert.notEqual(el.getAttribute('geometry'), null);
+      assert.equal(el.getAttribute('geometry'), null);
       // Geometry still exists since it is mixed in.
-      assert.ok('geometry' in el.components);
+      assert.notOk('geometry' in el.components);
+    });
+
+    test('resets a component property', function () {
+      var el = this.el;
+      el.setAttribute('material', 'color: #F0F');
+      assert.equal(el.getAttribute('material').color, '#F0F');
+      el.removeAttribute('material', 'color');
+      assert.equal(el.getAttribute('material').color, '#FFF');
+    });
+
+    test('can clear mixins', function () {
+      var el = this.el;
+      mixinFactory('foo', {position: '1 2 3'});
+      mixinFactory('bar', {scale: '1 2 3'});
+      el.setAttribute('mixin', 'foo bar');
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 1, y: 2, z: 3});
+      assert.shallowDeepEqual(el.getAttribute('scale'), {x: 1, y: 2, z: 3});
+      el.removeAttribute('mixin');
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 0, y: 0, z: 0});
+      assert.shallowDeepEqual(el.getAttribute('scale'), {x: 1, y: 1, z: 1});
     });
   });
 
@@ -883,6 +1144,51 @@ suite('a-entity', function () {
       assert.ok(el.components.sound__1 instanceof components.sound.Component);
       assert.ok(el.components.sound__2 instanceof components.sound.Component);
     });
+
+    test('waits for DOM data to init before setAttribute data', function (done) {
+      // Test component.
+      AFRAME.registerComponent('test', {
+        schema: {
+          foo: {default: 5},
+          bar: {default: 'red'},
+          qux: {default: true}
+        },
+
+        init: function () {
+          var data = this.data;
+          assert.equal(data.foo, 10);
+          assert.equal(data.bar, 'red');
+          assert.equal(data.qux, true);
+        },
+
+        update: function (oldData) {
+          var data = this.data;
+          if (oldData && Object.keys(oldData).length) {
+            // Second update via setAttribute.
+            assert.equal(data.foo, 10);
+            assert.equal(data.bar, 'orange');
+            assert.equal(data.qux, true);
+            delete AFRAME.components['test-setter'];
+            done();
+          } else {
+            // First update via initialization.
+            assert.equal(data.foo, 10);
+            assert.equal(data.bar, 'red');
+            assert.equal(data.qux, true);
+          }
+        }
+      });
+
+      // Component that will do the setAttribute, without dependency.
+      AFRAME.registerComponent('test-setter', {
+        init: function () {
+          this.el.setAttribute('test', {bar: 'orange'});
+        }
+      });
+
+      // Create the entity.
+      this.el.innerHTML = '<a-entity test-setter test="foo: 10">';
+    });
   });
 
   suite('removeComponent', function () {
@@ -891,11 +1197,31 @@ suite('a-entity', function () {
       var sceneEl = el.sceneEl;
       var component;
       el.play();
-      el.setAttribute('look-controls', '');
-      component = el.components['look-controls'];
-      assert.notEqual(sceneEl.behaviors.indexOf(component), -1);
-      el.removeAttribute('look-controls');
-      assert.equal(sceneEl.behaviors.indexOf(component), -1);
+      el.setAttribute('raycaster', '');
+      component = el.components['raycaster'];
+      assert.notEqual(sceneEl.behaviors.tick.indexOf(component), -1);
+      el.removeAttribute('raycaster');
+      assert.equal(sceneEl.behaviors.tick.indexOf(component), -1);
+    });
+
+    test('waits for component to initialize', function (done) {
+      var box = document.createElement('a-entity');
+      var component;
+      var removeSpy;
+
+      box.setAttribute('geometry', {primitive: 'box'});
+      component = box.components.geometry;
+      removeSpy = this.sinon.stub(component, 'remove', () => {});
+
+      box.removeComponent('geometry');
+      assert.notOk(removeSpy.called);
+
+      component.initialized = true;
+      box.emit('componentinitialized', {name: 'geometry'});
+      setTimeout(() => {
+        assert.ok(removeSpy.called);
+        done();
+      });
     });
   });
 
@@ -917,31 +1243,50 @@ suite('a-entity', function () {
       assert.equal(el.getAttribute('material').color, 'blue');
     });
 
-    test('remove a component', function () {
+    test('removes a component', function () {
       var el = this.el;
       el.components.material = new components.material.Component(el, {color: 'red'});
       assert.equal(el.getAttribute('material').color, 'red');
+      el.components.material.attrValue = null;
       el.updateComponent('material', null);
       assert.equal(el.components.material, undefined);
     });
   });
 
-  suite('updateComponentAttribute', function () {
-    test('initialize a component', function () {
-      var el = this.el;
-      assert.equal(el.components.material, undefined);
-      el.updateComponentProperty('material', 'color', 'blue');
-      assert.equal(el.getAttribute('material').color, 'blue');
+  suite('updateComponents', function () {
+    setup(function (done) {
+      this.child = this.el.appendChild(document.createElement('a-entity'));
+      this.child.addEventListener('loaded', function () {
+        done();
+      });
     });
 
-    test('update a property of an existing component', function () {
-      var el = this.el;
-      var component = new components.material.Component(el, {color: 'red'});
-      el.components.material = component;
-      assert.equal(el.getAttribute('material').color, 'red');
-      el.updateComponentProperty('material', 'color', 'blue');
-      assert.equal(component, el.components.material);
-      assert.equal(el.getAttribute('material').color, 'blue');
+    test('nested calls do not leak components to children', function () {
+      registerComponent('test', {
+        init: function () {
+          var children = this.el.getChildEntities();
+          if (children.length) {
+            children[0].setAttribute('mixin', 'addGeometry');
+          }
+        }
+      });
+      mixinFactory('addTest', {test: ''});
+      mixinFactory('addGeometry', {geometry: 'shape: sphere'});
+      this.el.setAttribute('mixin', 'addTest');
+      assert.notOk(this.child.components['test']);
+    });
+
+    test('initializes object3d components first', function (done) {
+      registerComponent('test', {
+        init: function () {
+          var object3D = this.el.object3D;
+          assert.equal(object3D.position.y, 5);
+          assert.equal(object3D.visible, false);
+          done();
+        }
+      });
+
+      this.el.innerHTML = '<a-entity class="test" test position="0 5 0" visible="false"></a-entity';
     });
   });
 
@@ -1000,6 +1345,34 @@ suite('a-entity', function () {
       assert.equal(el.getAttribute('sound__1').autoplay, false);
       assert.equal(el.getAttribute('sound__2').src, soundUrl);
       assert.equal(el.getAttribute('sound__2').autoplay, true);
+    });
+
+    test('applies mixin ids separated with spaces, tabs, and new lines', function () {
+      var el = this.el;
+      mixinFactory('material', {material: 'shader: flat'});
+      mixinFactory('position', {position: '1 2 3'});
+      mixinFactory('rotation', {rotation: '10 20 45'});
+      el.setAttribute('mixin', '  material\t\nposition \t  rotation\n  ');
+      el.setAttribute('material', 'color: red');
+      assert.equal(el.mixinEls.length, 3);
+      assert.shallowDeepEqual(el.getAttribute('material'), {shader: 'flat', color: 'red'});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 1, y: 2, z: 3});
+      assert.shallowDeepEqual(el.getAttribute('rotation'), {x: 10, y: 20, z: 45});
+    });
+
+    test('clear mixin', function () {
+      var el = this.el;
+      mixinFactory('material', {material: 'shader: flat'});
+      mixinFactory('position', {position: '1 2 3'});
+      el.setAttribute('mixin', 'material position');
+      el.setAttribute('material', 'color: red');
+      assert.shallowDeepEqual(el.getAttribute('material'), {shader: 'flat', color: 'red'});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 1, y: 2, z: 3});
+      assert.equal(el.mixinEls.length, 2);
+      el.setAttribute('mixin', '');
+      assert.shallowDeepEqual(el.getAttribute('material'), {color: 'red'});
+      assert.shallowDeepEqual(el.getAttribute('position'), {x: 0, y: 0, z: 0});
+      assert.equal(el.mixinEls.length, 0);
     });
   });
 });
@@ -1068,6 +1441,47 @@ suite('a-entity component lifecycle management', function () {
     sinon.assert.calledOnce(TestComponent.update);
   });
 
+  test('does not check types if the same object is passed again', function () {
+    var el = this.el;
+    var componentData;
+    var attrValue = {a: 3};
+    el.setAttribute('test', attrValue);
+    componentData = el.getAttribute('test');
+    assert.ok(componentData.a === 3);
+    attrValue.a = '3';
+    el.setAttribute('test', attrValue);
+    componentData = el.getAttribute('test');
+    assert.ok(componentData.a === '3');
+  });
+
+  test('parses if mix of unparsed data and reused object from setAttribute', function (done) {
+    var componentData;
+    var el;
+    var parentEl = this.el;
+    var updateObj = {b: 5};
+
+    AFRAME.registerComponent('setter', {
+      init: function () {
+        setTimeout(() => {
+          this.el.setAttribute('test', updateObj);
+          updateObj.b = 10;
+          this.el.setAttribute('test', updateObj);
+        });
+      }
+    });
+
+    parentEl.innerHTML = '<a-entity setter test="a: 3">';
+
+    setTimeout(() => {
+      el = parentEl.children[0];
+      componentData = el.getAttribute('test');
+      assert.strictEqual(componentData.a, 3);
+      assert.strictEqual(componentData.b, 10);
+      delete AFRAME.components.setter;
+      done();
+    }, 50);
+  });
+
   test('calls remove on removeAttribute', function () {
     var el = this.el;
     var TestComponent = this.TestComponent.prototype;
@@ -1109,9 +1523,9 @@ suite('a-entity component lifecycle management', function () {
     el.sceneEl.addEventListener('loaded', function () {
       el.setAttribute('test', '');
       testComponentInstance = el.components.test;
-      assert.notEqual(el.sceneEl.behaviors.indexOf(testComponentInstance), -1);
+      assert.notEqual(el.sceneEl.behaviors.tick.indexOf(testComponentInstance), -1);
       el.pause();
-      assert.equal(el.sceneEl.behaviors.indexOf(testComponentInstance), -1);
+      assert.equal(el.sceneEl.behaviors.tick.indexOf(testComponentInstance), -1);
       done();
     });
   });
@@ -1123,9 +1537,35 @@ suite('a-entity component lifecycle management', function () {
       el.setAttribute('test', '');
       testComponentInstance = el.components.test;
       el.sceneEl.behaviors = [];
-      assert.equal(el.sceneEl.behaviors.indexOf(testComponentInstance), -1);
+      assert.equal(el.sceneEl.behaviors.tick.indexOf(testComponentInstance), -1);
       el.play();
-      assert.equal(el.sceneEl.behaviors.indexOf(testComponentInstance), -1);
+      assert.equal(el.sceneEl.behaviors.tick.indexOf(testComponentInstance), -1);
+    });
+  });
+
+  test('removes tock from scene behaviors on entity pause', function (done) {
+    var el = this.el;
+    var testComponentInstance;
+    el.sceneEl.addEventListener('loaded', function () {
+      el.setAttribute('test', '');
+      testComponentInstance = el.components.test;
+      assert.notEqual(el.sceneEl.behaviors.tock.indexOf(testComponentInstance), -1);
+      el.pause();
+      assert.equal(el.sceneEl.behaviors.tock.indexOf(testComponentInstance), -1);
+      done();
+    });
+  });
+
+  test('adds tock to scene behaviors on entity play', function () {
+    var el = this.el;
+    var testComponentInstance;
+    el.sceneEl.addEventListener('loaded', function () {
+      el.setAttribute('test', '');
+      testComponentInstance = el.components.test;
+      el.sceneEl.behaviors = [];
+      assert.equal(el.sceneEl.behaviors.tock.indexOf(testComponentInstance), -1);
+      el.play();
+      assert.equal(el.sceneEl.behaviors.tock.indexOf(testComponentInstance), -1);
     });
   });
 });

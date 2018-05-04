@@ -1,6 +1,19 @@
 /* global suite */
 
 /**
+ * Add an event listener to be executed only once. Help when reusing entities across
+ * tests and an event emitted in one may be picked up by another, causing test failures.
+ */
+module.exports.once = function (el, eventName, handler) {
+  var done = false;
+  el.addEventListener(eventName, function onceHandler (evt) {
+    if (done) { return; }
+    handler(evt);
+    done = true;
+  });
+};
+
+/**
  * Helper method to create a scene, create an entity, add entity to scene,
  * add scene to document.
  *
@@ -10,6 +23,7 @@ module.exports.entityFactory = function (opts) {
   var scene = document.createElement('a-scene');
   var assets = document.createElement('a-assets');
   var entity = document.createElement('a-entity');
+
   scene.appendChild(assets);
   scene.appendChild(entity);
 

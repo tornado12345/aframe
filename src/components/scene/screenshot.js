@@ -10,25 +10,27 @@ var VERTEX_SHADER = [
   'varying vec2 vUv;',
   'void main()  {',
   '  vUv = vec2( 1.- uv.x, uv.y );',
-  '  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );'
+  '  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );',
+  '}'
 ].join('\n');
 
 var FRAGMENT_SHADER = [
-  'precision mediump float',
-  'uniform samplerCube map',
-  'varying vec2 vUv',
+  'precision mediump float;',
+  'uniform samplerCube map;',
+  'varying vec2 vUv;',
   '#define M_PI 3.141592653589793238462643383279',
-  'void main()  ',
-  '  vec2 uv = vUv',
-  '  float longitude = uv.x * 2. * M_PI - M_PI + M_PI / 2.',
-  '  float latitude = uv.y * M_PI',
-  '  vec3 dir = vec3',
-  '    - sin( longitude ) * sin( latitude )',
-  '    cos( latitude )',
-  '    - cos( longitude ) * sin( latitude ',
-  '  )',
-  '  normalize( dir )',
-  '  gl_FragColor = vec4( textureCube( map, dir ).rgb, 1.0 )'
+  'void main() {',
+  '  vec2 uv = vUv;',
+  '  float longitude = uv.x * 2. * M_PI - M_PI + M_PI / 2.;',
+  '  float latitude = uv.y * M_PI;',
+  '  vec3 dir = vec3(',
+  '    - sin( longitude ) * sin( latitude ),',
+  '    cos( latitude ),',
+  '    - cos( longitude ) * sin( latitude )',
+  '  );',
+  '  normalize( dir );',
+  '  gl_FragColor = vec4( textureCube( map, dir ).rgb, 1.0 );',
+  '}'
 ].join('\n');
 
 /**
@@ -45,19 +47,22 @@ module.exports.Component = registerComponent('screenshot', {
   schema: {
     width: {default: 4096},
     height: {default: 2048},
-    projection: {default: 'equirectangular', oneOf: ['equirectangular', 'perspective']}
+    camera: {type: 'selector'}
   },
 
   init: function () {
     var el = this.el;
     var self = this;
+
     if (el.renderer) {
       setup();
     } else {
       el.addEventListener('render-target-loaded', setup);
     }
+
     function setup () {
       var gl = el.renderer.getContext();
+      if (!gl) { return; }
       self.cubeMapSize = gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE);
       self.material = new THREE.RawShaderMaterial({
         uniforms: {map: {type: 't', value: null}},
@@ -70,7 +75,7 @@ module.exports.Component = registerComponent('screenshot', {
         self.material
       );
       self.quad.visible = false;
-      self.camera = new THREE.OrthographicCamera(1 / -2, 1 / 2, 1 / 2, 1 / -2, -10000, 10000);
+      self.camera = new THREE.OrthographicCamera(-1 / 2, 1 / 2, 1 / 2, -1 / 2, -10000, 10000);
       self.canvas = document.createElement('canvas');
       self.ctx = self.canvas.getContext('2d');
       if (el.camera) { el.camera.add(self.quad); }
@@ -92,17 +97,17 @@ module.exports.Component = registerComponent('screenshot', {
   },
 
   resize: function (width, height) {
-    // Resize quad
+    // Resize quad.
     this.quad.scale.set(width, height, 1);
 
-    // Resize Camera
-    this.camera.left = width / -2;
+    // Resize camera.
+    this.camera.left = -1 * width / 2;
     this.camera.right = width / 2;
     this.camera.top = height / 2;
-    this.camera.bottom = height / -2;
+    this.camera.bottom = -1 * height / 2;
     this.camera.updateProjectionMatrix();
 
-    // Resize canvas
+    // Resize canvas.
     this.canvas.width = width;
     this.canvas.height = height;
   },
@@ -118,75 +123,102 @@ module.exports.Component = registerComponent('screenshot', {
   },
 
   /**
-   * <ctrl> + <alt> + s keyboard shortcut.
-   */
+   * <ctrl> + <alt> + s = Regular screenshot.
+   * <ctrl> + <alt> + <shift> + s = Equirectangular screenshot.
+  */
   onKeyDown: function (evt) {
     var shortcutPressed = evt.keyCode === 83 && evt.ctrlKey && evt.altKey;
     if (!this.data || !shortcutPressed) { return; }
-    this.capture();
+    var projection = evt.shiftKey ? 'equirectangular' : 'perspective';
+    this.capture(projection);
   },
 
-  capture: function () {
+  /**
+   * Capture a screenshot of the scene.
+   *
+   * @param {string} projection - Screenshot projection (equirectangular or perspective).
+   */
+  setCapture: function (projection) {
     var el = this.el;
-    var renderer = el.renderer;
     var size;
     var camera;
     var cubeCamera;
-    // Configure camera
-    if (this.data.projection === 'perspective') {
-      // the quad is used for projection in the equirectangular mode
-      // we hide it in this case.
+    // Configure camera.
+    if (projection === 'perspective') {
+      // Quad is only used in equirectangular mode. Hide it in this case.
       this.quad.visible = false;
-      // use scene camera
-      camera = el.camera;
-      size = renderer.getSize();
+      // Use scene camera.
+      camera = (this.data.camera && this.data.camera.components.camera.camera) || el.camera;
+      size = {width: this.data.width, height: this.data.height};
     } else {
-      // use ortho camera
+      // Use ortho camera.
       camera = this.camera;
-      // copy position and rotation of scene camera into the ortho one
+      // Copy position and rotation of scene camera into the ortho one.
       camera.position.copy(el.camera.getWorldPosition());
       camera.rotation.copy(el.camera.getWorldRotation());
-      // create cube camera and copy position from scene camera
-      cubeCamera = new THREE.CubeCamera(el.camera.near, el.camera.far, Math.min(this.cubeMapSize, 2048));
+      // Create cube camera and copy position from scene camera.
+      cubeCamera = new THREE.CubeCamera(el.camera.near, el.camera.far,
+                                        Math.min(this.cubeMapSize, 2048));
       cubeCamera.position.copy(el.camera.getWorldPosition());
       cubeCamera.rotation.copy(el.camera.getWorldRotation());
-      // render scene with cube camera
+      // Render scene with cube camera.
       cubeCamera.updateCubeMap(el.renderer, el.object3D);
       this.quad.material.uniforms.map.value = cubeCamera.renderTarget.texture;
       size = {width: this.data.width, height: this.data.height};
-      // use quad to project image taken by the cube camera
+      // Use quad to project image taken by the cube camera.
       this.quad.visible = true;
     }
-    this.renderCapture(camera, size);
-    // Trigger file download
+    return {
+      camera: camera,
+      size: size,
+      projection: projection
+    };
+  },
+
+  /**
+   * Maintained for backwards compatibility.
+   */
+  capture: function (projection) {
+    var params = this.setCapture(projection);
+    this.renderCapture(params.camera, params.size, params.projection);
+    // Trigger file download.
     this.saveCapture();
   },
 
-  renderCapture: function (camera, size) {
+  /**
+   * Return canvas instead of triggering download (e.g., for uploading blob to server).
+   */
+  getCanvas: function (projection) {
+    var params = this.setCapture(projection);
+    this.renderCapture(params.camera, params.size, params.projection);
+    return this.canvas;
+  },
+
+  renderCapture: function (camera, size, projection) {
     var autoClear = this.el.renderer.autoClear;
     var el = this.el;
     var imageData;
     var output;
     var pixels;
     var renderer = this.el.renderer;
-    // Create rendering target and buffer to store the read pixels
+    // Create rendering target and buffer to store the read pixels.
     output = this.getRenderTarget(size.width, size.height);
     pixels = new Uint8Array(4 * size.width * size.height);
-    // Resize quad, camera and canvas
+    // Resize quad, camera, and canvas.
     this.resize(size.width, size.height);
-    // Render scene to render target
+    // Render scene to render target.
     renderer.autoClear = true;
     renderer.render(el.object3D, camera, output, true);
     renderer.autoClear = autoClear;
-    // Read image pizels back
+    // Read image pizels back.
     renderer.readRenderTargetPixels(output, 0, 0, size.width, size.height, pixels);
-    if (this.data.projection === 'perspective') {
+    if (projection === 'perspective') {
       pixels = this.flipPixelsVertically(pixels, size.width, size.height);
     }
     imageData = new ImageData(new Uint8ClampedArray(pixels), size.width, size.height);
-    // Hide quad after projecting the image
+    // Hide quad after projecting the image.
     this.quad.visible = false;
-    // Copy pixels into canvas
+    // Copy pixels into canvas.
     this.ctx.putImageData(imageData, 0, 0);
   },
 
@@ -203,19 +235,22 @@ module.exports.Component = registerComponent('screenshot', {
     return flippedPixels;
   },
 
+  /**
+   * Download capture to file.
+   */
   saveCapture: function () {
     this.canvas.toBlob(function (blob) {
+      var fileName = 'screenshot-' + document.title.toLowerCase() + '-' + Date.now() + '.png';
+      var linkEl = document.createElement('a');
       var url = URL.createObjectURL(blob);
-      var fileName = 'screenshot-' + document.title + '-' + Date.now() + '.png';
-      var aEl = document.createElement('a');
-      aEl.href = url;
-      aEl.setAttribute('download', fileName);
-      aEl.innerHTML = 'downloading...';
-      aEl.style.display = 'none';
-      document.body.appendChild(aEl);
+      linkEl.href = url;
+      linkEl.setAttribute('download', fileName);
+      linkEl.innerHTML = 'downloading...';
+      linkEl.style.display = 'none';
+      document.body.appendChild(linkEl);
       setTimeout(function () {
-        aEl.click();
-        document.body.removeChild(aEl);
+        linkEl.click();
+        document.body.removeChild(linkEl);
       }, 1);
     }, 'image/png');
   }

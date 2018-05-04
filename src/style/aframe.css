@@ -35,7 +35,7 @@
 
 .a-canvas.a-grab-cursor:hover {
   cursor: grab;
-  cursor: -moz-grabbing;
+  cursor: -moz-grab;
   cursor: -webkit-grab;
 }
 
@@ -46,15 +46,14 @@
   cursor: -webkit-grabbing;
 }
 
-// Class is removed when doing <a-scene embedded>.
-.a-canvas.fullscreen {
+/* Class is removed when doing <a-scene embedded>. */
+a-scene.fullscreen .a-canvas {
   width: 100% !important;
   height: 100% !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
-  z-index: 999999 !important;
   position: fixed !important;
 }
 
@@ -70,7 +69,7 @@
   font-family: Roboto,sans-serif;
   text-align: center;
   z-index: 99999;
-  width: 174px;
+  width: 204px;
 }
 
 /* Inspector loader animation */
@@ -131,13 +130,11 @@ a-scene audio {
 }
 
 .a-enter-vr {
-  bottom: 5px;
   font-family: sans-serif, monospace;
   font-size: 13px;
   width: 100%;
   font-weight: 200;
   line-height: 16px;
-  height: 10%;
   position: absolute;
   right: 20px;
   bottom: 20px;
