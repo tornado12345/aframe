@@ -3,12 +3,12 @@
 To include these builds, you can download and serve them locally.
 
 To include the latest [master build](#master-builds) from a CDN, include the
-script below from the [rawgit CDN](https://rawgit.com/):
+script below from the [jsdelivr CDN](https://www.jsdelivr.com/):
 
 ```html
 <html>
   <head>
-    <script src="https://rawgit.com/aframevr/aframe/3e7a4b3/dist/aframe-master.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@9b0be54ab4dc167ad19de8ceb8fd2c2eaa74ded8/dist/aframe-master.min.js"></script>
   </head>
   <body>
     <a-scene>
@@ -34,7 +34,7 @@ These master builds are unstable **bleeding-edge unstable builds** that contain
 newer fixes or features from the **master branch** on GitHub, but may contain
 regressions or breaking changes.
 
-If you're pointing to these builds via the [rawgit CDN](https://rawgit.com/),
+If you're pointing to these builds via the [jsDelivr CDN](https://www.jsdelivr.com/features#gh),
 we recommend locking it down to a commit hash rather than pointing directly at
 master such that your scene does not break unexpectedly.
 

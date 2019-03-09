@@ -155,6 +155,16 @@ suite('cursor', function () {
       });
       component.onCursorUp();
     });
+
+    test('emits click event on intersectedEl when fuse and mouse cursor enabled', function (done) {
+      el.setAttribute('cursor', 'fuse', true);
+      el.setAttribute('cursor', 'rayOrigin', 'mouse');
+      component.intersection = intersection;
+      component.intersectedEl = intersectedEl;
+      component.cursorDownEl = intersectedEl;
+      once(intersectedEl, 'click', function () { done(); });
+      component.onCursorUp({type: 'touchend', preventDefault: function () {}});
+    });
   });
 
   suite('onIntersection', function () {
@@ -448,7 +458,9 @@ suite('cursor', function () {
       // Cannot spy on onCursorDown/Up directly due to binding.
       var cursorEmitSpy = this.sinon.spy(component, 'twoWayEmit');
       var downEvt = new CustomEvent('touchstart');
+      downEvt.touches = [];
       var upEvt = new CustomEvent('touchend');
+      upEvt.touches = [];
       assert.isFalse(cursorEmitSpy.calledWith('mousedown'));
       el.sceneEl.canvas.dispatchEvent(downEvt);
       assert.isTrue(cursorEmitSpy.calledWith('mousedown'));
