@@ -39,9 +39,9 @@ suite('Component', function () {
           size: {default: 5}
         }
       });
-      var el = document.createElement('a-entity');
+      const el = document.createElement('a-entity');
       el.setAttribute('dummy', '');
-      var data = el.components.dummy.buildData({}, null);
+      const data = el.components.dummy.buildData({}, null);
       assert.equal(data.color, 'blue');
       assert.equal(data.size, 5);
     });
@@ -285,8 +285,11 @@ suite('Component', function () {
   suite('updateProperties', function () {
     var el;
 
-    setup(function () {
-      el = entityFactory();
+    setup(function (done) {
+      helpers.elFactory().then(_el => {
+        el = _el;
+        done();
+      });
       components.dummy = undefined;
     });
 
@@ -343,7 +346,7 @@ suite('Component', function () {
       }, 100);
     });
 
-    test('does not update for multi-prop if not changed', function (done) {
+    test('does not update for multi-prop if not changed', function () {
       var spy = this.sinon.spy();
 
       AFRAME.registerComponent('test', {
@@ -357,16 +360,13 @@ suite('Component', function () {
         }
       });
 
-      el.addEventListener('loaded', () => {
-        el.setAttribute('test', {foo: 'foo', bar: 'bar'});
-        el.setAttribute('test', {foo: 'foo', bar: 'bar'});
-        el.setAttribute('test', {foo: 'foo', bar: 'bar'});
-        assert.equal(spy.getCalls().length, 1);
-        done();
-      });
+      el.setAttribute('test', {foo: 'foo', bar: 'bar'});
+      el.setAttribute('test', {foo: 'foo', bar: 'bar'});
+      el.setAttribute('test', {foo: 'foo', bar: 'bar'});
+      assert.equal(spy.getCalls().length, 1);
     });
 
-    test('does not update for multi-prop if not changed using same object', function (done) {
+    test('does not update for multi-prop if not changed using same object', function () {
       var data = {foo: 'foo', bar: 'bar'};
       var spy = this.sinon.spy();
 
@@ -381,13 +381,10 @@ suite('Component', function () {
         }
       });
 
-      el.addEventListener('loaded', () => {
-        el.setAttribute('test', data);
-        el.setAttribute('test', data);
-        el.setAttribute('test', data);
-        assert.equal(spy.getCalls().length, 1);
-        done();
-      });
+      el.setAttribute('test', data);
+      el.setAttribute('test', data);
+      el.setAttribute('test', data);
+      assert.equal(spy.getCalls().length, 1);
     });
 
     test('does not emit componentchanged for single-prop if not changed', function (done) {
@@ -461,11 +458,9 @@ suite('Component', function () {
     });
 
     test('clones plain object schema default into data', function () {
-      var el;
       registerComponent('dummy', {
         schema: {type: 'vec3', default: {x: 1, y: 1, z: 1}}
       });
-      el = document.createElement('a-entity');
       el.hasLoaded = true;
       el.setAttribute('dummy', '2 2 2');
       el.components.dummy.updateProperties('');
@@ -474,7 +469,6 @@ suite('Component', function () {
     });
 
     test('does not clone properties from attrValue into data that are not plain objects', function () {
-      var el;
       registerComponent('dummy', {
         schema: {
           color: {default: 'blue'},
@@ -482,7 +476,6 @@ suite('Component', function () {
           el: {type: 'selector', default: 'body'}
         }
       });
-      el = document.createElement('a-entity');
       el.hasLoaded = true;
       el.setAttribute('dummy', '');
       assert.notOk(el.components.dummy.attrValue.el);
@@ -490,7 +483,6 @@ suite('Component', function () {
 
     test('does not clone props from attrValue into data that are not plain objects', function () {
       var attrValue;
-      var el;
       var data;
 
       registerComponent('dummy', {
@@ -501,7 +493,6 @@ suite('Component', function () {
         }
       });
 
-      el = document.createElement('a-entity');
       el.hasLoaded = true;
       el.setAttribute('dummy', '');
       assert.notOk(el.components.dummy.attrValue.el);
@@ -538,7 +529,6 @@ suite('Component', function () {
     });
 
     test('updates data when combining setAttribute and object3D manipulation', function () {
-      var el = document.createElement('a-entity');
       el.hasLoaded = true;
       el.setAttribute('position', '3 3 3');
       assert.equal(3, el.object3D.position.x);
@@ -1072,7 +1062,6 @@ suite('Component', function () {
   });
 
   test('applies default array property types with no defined value', function (done) {
-    var el;
     registerComponent('test', {
       schema: {
         arr: {default: ['foo']}
@@ -1083,9 +1072,112 @@ suite('Component', function () {
         done();
       }
     });
-    el = entityFactory();
+    const el = entityFactory();
     el.addEventListener('loaded', () => {
       el.setAttribute('test', '');
+    });
+  });
+
+  suite('events', () => {
+    let component;
+    let el;
+    let fooSpy;
+
+    setup(function (done) {
+      fooSpy = this.sinon.spy();
+
+      registerComponent('test', {
+        events: {
+          foo: function (evt) {
+            assert.ok(evt);
+            assert.ok(this === component);
+            fooSpy();
+          }
+        }
+      });
+
+      helpers.elFactory().then(_el => {
+        el = _el;
+        el.setAttribute('test', '');
+        component = el.components.test;
+        done();
+      });
+    });
+
+    test('calls handler on event', function (done) {
+      el.emit('foo');
+      setTimeout(() => {
+        assert.equal(fooSpy.callCount, 1);
+        done();
+      });
+    });
+
+    test('detaches on component pause', function (done) {
+      component.pause();
+      el.emit('foo');
+      setTimeout(() => {
+        assert.notOk(fooSpy.called);
+        done();
+      });
+    });
+
+    test('detaches on component remove', function (done) {
+      el.removeAttribute('test');
+      el.emit('foo');
+      setTimeout(() => {
+        assert.notOk(fooSpy.called);
+        done();
+      });
+    });
+
+    test('detaches on entity pause', function (done) {
+      el.pause();
+      el.emit('foo');
+      setTimeout(() => {
+        assert.notOk(fooSpy.called);
+        done();
+      });
+    });
+
+    test('detaches on entity remove', function (done) {
+      el.parentNode.removeChild(el);
+      setTimeout(() => {
+        el.emit('foo');
+        setTimeout(() => {
+          assert.notOk(fooSpy.called);
+          done();
+        });
+      });
+    });
+
+    test('does not collide with other component instances', function (done) {
+      registerComponent('test2', {
+        events: {
+          foo: function (evt) {
+            assert.equal(this.el.id, 'foo');
+          },
+
+          bar: function (evt) {
+            assert.equal(this.el.id, 'bar');
+          }
+        }
+      });
+
+      el.id = 'foo';
+      el.setAttribute('test2', '');
+
+      const el2 = document.createElement('a-entity');
+      el2.id = 'bar';
+      el2.setAttribute('test2', '');
+      el.appendChild(el2);
+
+      setTimeout(() => {
+        el.emit('foo', null, false);
+        el2.emit('bar', null, false);
+        setTimeout(() => {
+          done();
+        });
+      });
     });
   });
 });

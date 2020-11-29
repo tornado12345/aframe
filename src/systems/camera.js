@@ -228,7 +228,7 @@ module.exports.System = registerSystem('camera', {
    * the spectator camera after vrDisplay.submitFrame.
    */
   wrapRender: function () {
-    if (!this.spectatorCameraEl) { return; }
+    if (!this.spectatorCameraEl || this.originalRender) { return; }
     this.originalRender = this.sceneEl.renderer.render;
     this.sceneEl.renderer.render = this.render;
   },
@@ -239,18 +239,18 @@ module.exports.System = registerSystem('camera', {
     this.originalRender = undefined;
   },
 
-  render: function (scene, camera, renderTarget) {
+  render: function (scene, camera) {
     var isVREnabled;
     var sceneEl = this.sceneEl;
     var spectatorCamera;
 
-    isVREnabled = sceneEl.renderer.vr.enabled;
-    this.originalRender.call(sceneEl.renderer, scene, camera, renderTarget);
+    isVREnabled = sceneEl.renderer.xr.enabled;
+    this.originalRender.call(sceneEl.renderer, scene, camera);
     if (!this.spectatorCameraEl || sceneEl.isMobile || !isVREnabled) { return; }
     spectatorCamera = this.spectatorCameraEl.components.camera.camera;
-    sceneEl.renderer.vr.enabled = false;
+    sceneEl.renderer.xr.enabled = false;
     this.originalRender.call(sceneEl.renderer, scene, spectatorCamera);
-    sceneEl.renderer.vr.enabled = isVREnabled;
+    sceneEl.renderer.xr.enabled = isVREnabled;
   }
 });
 

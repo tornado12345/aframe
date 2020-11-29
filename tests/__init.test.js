@@ -26,12 +26,12 @@ setup(function () {
   this.sinon = sinon.sandbox.create();
   // Stubs to not create a WebGL context since Travis CI runs headless.
   this.sinon.stub(AScene.prototype, 'render');
-  this.sinon.stub(AScene.prototype, 'resize');
   this.sinon.stub(AScene.prototype, 'setupRenderer');
   // Mock renderer.
   AScene.prototype.renderer = {
-    vr: {
+    xr: {
       getDevice: function () { return {requestPresent: function () {}}; },
+      isPresenting: function () { return true; },
       setDevice: function () {},
       setPoseTarget: function () {},
       enabled: false
@@ -39,7 +39,9 @@ setup(function () {
     getContext: function () { return undefined; },
     setAnimationLoop: function () {},
     setSize: function () {},
-    shadowMap: {}
+    setPixelRatio: function () {},
+    render: function () {},
+    shadowMap: {enabled: false}
   };
 });
 

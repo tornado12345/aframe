@@ -50,6 +50,7 @@ module.exports.Component = registerComponent('raycaster', {
     objects: {default: ''},
     origin: {type: 'vec3'},
     showLine: {default: false},
+    lineColor: {default: 'white'},
     useWorldCoordinates: {default: false}
   },
 
@@ -184,7 +185,7 @@ module.exports.Component = registerComponent('raycaster', {
   /**
    * Check for intersections and cleared intersections on an interval.
    */
-  tick: function (time) {
+  tock: function (time) {
     var data = this.data;
     var prevCheckTime = this.prevCheckTime;
 
@@ -275,7 +276,7 @@ module.exports.Component = registerComponent('raycaster', {
     }
 
     // Update line length.
-    setTimeout(this.updateLine);
+    if (data.showLine) { setTimeout(this.updateLine); }
   },
 
   updateLine: function () {
@@ -283,16 +284,14 @@ module.exports.Component = registerComponent('raycaster', {
     var intersections = this.intersections;
     var lineLength;
 
-    if (this.data.showLine) {
-      if (intersections.length) {
-        if (intersections[0].object.el === el && intersections[1]) {
-          lineLength = intersections[1].distance;
-        } else {
-          lineLength = intersections[0].distance;
-        }
+    if (intersections.length) {
+      if (intersections[0].object.el === el && intersections[1]) {
+        lineLength = intersections[1].distance;
+      } else {
+        lineLength = intersections[0].distance;
       }
-      this.drawLine(lineLength);
     }
+    this.drawLine(lineLength);
   },
 
   /**
@@ -328,8 +327,8 @@ module.exports.Component = registerComponent('raycaster', {
         return;
       }
 
-      // Grab the position and rotation. (As a side effect, this updates el.object3D.matrixWorld.)
-      el.object3D.getWorldPosition(originVec3);
+      el.object3D.updateMatrixWorld();
+      originVec3.setFromMatrixPosition(el.object3D.matrixWorld);
 
       // If non-zero origin, translate the origin into world space.
       if (data.origin.x !== 0 || data.origin.y !== 0 || data.origin.z !== 0) {
@@ -378,6 +377,7 @@ module.exports.Component = registerComponent('raycaster', {
     // given by data.direction, then we apply a scalar to give it a length.
     this.lineData.start = data.origin;
     this.lineData.end = endVec3.copy(this.unitLineEndVec3).multiplyScalar(length);
+    this.lineData.color = data.lineColor;
     el.setAttribute('line', this.lineData);
   },
 
